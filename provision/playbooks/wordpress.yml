@@ -2,6 +2,7 @@
 - hosts: all
   vars:
     path: "{{ vccw.document_root }}/{{ vccw.wp_siteurl }}"
+    wpbuild: "{{ path }}/build"
     user: "{{ ansible_env.USER | default( 'ubuntu' ) }}"
 
   tasks:
@@ -37,13 +38,18 @@
       path: "{{ path }}/index.html"
       state: absent
 
-  # download wordpress
-  - name: Run `wp core download`
-    command: |
-      wp core download
-      --path={{ path }}
-      --version={{ vccw.version }}
-      --force
+  # Initialize WordPress
+  - name: Clone WordPress-Develop
+    command: git clone git://develop.git.wordpress.org/ {{ vccw.document_root }}
+
+  - name: Install NPM packages for WP
+    npm:
+      path: "{{ vccw.document_root }}"
+
+  - name: Grunt build WP
+    command: grunt
+    args:
+      chdir: "{{ vccw.document_root }}"
 
   # wp-config.php
   - name: Create temporary file for extra-php in wp-config.php
@@ -54,7 +60,7 @@
     shell: |
        wp core config \
        --force \
-       --path={{ path }} \
+       --path={{ wpbuild }} \
        --dbhost={{ vccw.db_host }} \
        --dbname={{ vccw.db_name }} \
        --dbuser={{ vccw.db_user }} \
@@ -62,17 +68,19 @@
        --dbprefix={{ vccw.db_prefix }} \
        --locale={{ vccw.lang }} \
        --extra-php < /tmp/extra-wp-config.php
+  - name: Move wp-config.php out of build directory
+    command: mv {{ wpbuild }}/wp-config.php {{ path }}/wp-config.php
 
   # Reset Database
   - name: Run `wp db reset`
-    command: wp db reset --yes --path={{ path }}
+    command: wp db reset --yes --path={{ wpbuild }}
     when: vccw.reset_db_on_provision
 
   # install wordpress
   - name: Run `wp core install`
     command: |
       wp core install
-      --path={{ path }}
+      --path={{ wpbuild }}
       --url=http://{{ vccw.hostname }}/{{ vccw.wp_siteurl }}
       --title='{{ vccw.title }}'
       --admin_user={{ vccw.admin_user }}
@@ -105,100 +113,91 @@
   - name: Run `wp core language install`
     command: |
       wp core language install {{ vccw.lang }}
-      --path={{ path }}
+      --path={{ wpbuild }}
       --activate
 
-  # Install Plugins
-  - name: Run `wp plugin install`
-    command: |
-      wp plugin install {{ item }}
-      --activate
-      --path={{ path }}
-      --force
-    with_items: "{{ vccw.plugins | default([]) }}"
-
-  # Install wp-multibyte-patch
-  - name: Run `wp plugin install wp-multibyte-patch`
-    command: |
-      wp plugin install wp-multibyte-patch
-      --activate
-      --path={{ path }}
-      --force
-    when: vccw.lang == 'ja'
-
-  # Install Theme
-  - name: Run `wp theme install`
-    command: |
-      wp theme install {{ vccw.theme }}
-      --path={{ path }} --activate --force
-    when: vccw.theme != ''
-
-  # Import Theme Unit Test Data
-  - name: Install `wordpress-importer`
-    command: |
-      wp plugin install https://github.com/WordPress/wordpress-importer/archive/master.zip
-      --activate
-      --path={{ path }}
-      --force
-    when: vccw.theme_unit_test
-  - name: Download WordPress theme unit test data
-    when: vccw.theme_unit_test
-    get_url:
-      url: "{{ vccw.theme_unit_test_uri }}"
-      dest: "/tmp/theme-unit-test-data.xml"
-  - name: Import WordPress theme unit test data
-    when: vccw.theme_unit_test
-    command: |
-      wp import
-      /tmp/theme-unit-test-data.xml
-      --authors=create
-      --path={{ path }}
+#  # Install Plugins
+#  - name: Run `wp plugin install`
+#    command: |
+#      wp plugin install {{ item }}
+#      --activate
+#      --path={{ wpbuild }}
+#      --force
+#    with_items: "{{ vccw.plugins | default([]) }}"
+#
+#  # Install Theme
+#  - name: Run `wp theme install`
+#    command: |
+#      wp theme install {{ vccw.theme }}
+#      --path={{ path }} --activate --force
+#    when: vccw.theme != ''
+#
+#  # Import Theme Unit Test Data
+#  - name: Install `wordpress-importer`
+#    command: |
+#      wp plugin install https://github.com/WordPress/wordpress-importer/archive/master.zip
+#      --activate
+#      --path={{ path }}
+#      --force
+#    when: vccw.theme_unit_test
+#  - name: Download WordPress theme unit test data
+#    when: vccw.theme_unit_test
+#    get_url:
+#      url: "{{ vccw.theme_unit_test_uri }}"
+#      dest: "/tmp/theme-unit-test-data.xml"
+#  - name: Import WordPress theme unit test data
+#    when: vccw.theme_unit_test
+#    command: |
+#      wp import
+#      /tmp/theme-unit-test-data.xml
+#      --authors=create
+#      --path={{ path }}
 
   # Import Options
   - name: Run `wp options update`
     command: |
       wp option update {{ item.key }} '{{ item.value }}'
-      --path={{ path }}
+      --path={{ wpbuild }}
     with_dict: "{{ vccw.options }}"
 
   # Localization
   - name: Get the timezone
     command: |
       wp eval "echo _x( '0', 'default GMT offset or timezone string' );"
-      --path={{ path }}
+      --path={{ wpbuild }}
     register: timezone
   - name: Update timezone
     command: |
       wp option update timezone_string '{{ timezone.stdout }}'
-      --path={{ path }}
+      --path={{ wpbuild }}
 
   - name: Get the date format
     command: |
       wp eval "echo __( 'M jS Y' );"
-      --path={{ path }}
+      --path={{ wpbuild }}
     register: date_format
   - name: Update date format
     command: |
       wp option update date_format '{{ date_format.stdout }}'
-      --path={{ path }}
+      --path={{ wpbuild }}
 
   # Setting Permalink
   - name: Run `wp rewrite structure`
     command: |
       wp rewrite structure {{ vccw.rewrite_structure }}
-      --path={{ path }}
+      --path={{ wpbuild }}
   - name: Flush rewrite rules
     command: |
       wp rewrite flush
       --hard
-      --path={{ path }}
+      --path={{ wpbuild }}
 
  # multisite Settings
   - name: Run `wp core multisite-convert`
     when: vccw.multisite
     command: |
       wp core multisite-convert
-      --path={{ path }}
+      --path={{ wpbuild }}
   - name: Create `.htaccess` for multisite
     when: vccw.multisite
     template:
@@ -210,7 +209,7 @@
   - name: Setting up Wordpress multisite options
     command: |
       wp network meta update 1 {{ item.key }} '{{ item.value }}'
-      --path={{ path }}
+      --path={{ wpbuild }}
     with_dict: "{{ vccw.multisite_options | default({}) }}"
     when: vccw.multisite
 
@@ -223,7 +222,7 @@
     register: is_movefile
   - name: Create a Movefile
     become: no
-    shell: /bin/bash -lc "wp scaffold movefile --path={{ path }} --force"
+    shell: /bin/bash -lc "wp scaffold movefile --path={{ wpbuild }} --force"
     args:
       chdir: "{{ vccw.vagrant_dir }}"
       creates: Movefile.yml
