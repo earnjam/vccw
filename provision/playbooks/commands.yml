@@ -109,6 +109,12 @@
       with_items: "{{ vccw.ruby_gems | default([]) }}"
       ignore_errors: yes
 
+    # Install Grunt CLI
+    - name: Install Grunt CLI
+      npm:
+        name: grunt-cli
+        global: yes
+
     # Install npm packages
     - name: Place a ~/.npmrc
       become: no
