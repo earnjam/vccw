@@ -87,6 +87,7 @@
 
   # Install/Configure ModSecurity
   - name: Install ModSecurity
+    become: yes
     apt:
       name: libapache2-modsecurity
       update_cache: yes
