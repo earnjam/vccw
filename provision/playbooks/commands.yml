@@ -111,6 +111,7 @@
 
     # Install Grunt CLI
     - name: Install Grunt CLI
+      become: yes
       npm:
         name: grunt-cli
         global: yes
